@@ -40,6 +40,7 @@ Doctor.init(
     bio: {
       type: DataTypes.TEXT("long"),
       allowNull: false,
+      defaultValue: "",
     },
     avatarUrl: {
       type: DataTypes.STRING(1200),

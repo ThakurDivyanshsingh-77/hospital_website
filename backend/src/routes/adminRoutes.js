@@ -371,6 +371,7 @@ router.post("/doctors", async (req, res) => {
     const qualification = String(req.body.qualification || "").trim();
     const experienceYears = Number(req.body.experienceYears || 0);
     const departmentId = req.body.departmentId ? Number(req.body.departmentId) : null;
+    const bio = String(req.body.bio || "").trim();
 
     if (!email || password.length < 6 || !fullName || !specialty) {
       return res.status(400).json({ message: "Invalid doctor data" });
@@ -381,36 +382,53 @@ router.post("/doctors", async (req, res) => {
       return res.status(409).json({ message: "Email already in use" });
     }
 
-    const passwordHash = await User.hashPassword(password);
-    const doctorUser = await User.create({
-      fullName,
-      email,
-      passwordHash,
-      role: "doctor",
-    });
-
-    const doctor = await Doctor.create({
-      userId: doctorUser.id,
-      departmentId: departmentId || null,
-      fullName,
-      specialty,
-      qualification,
-      experienceYears,
-    });
-
-    const populatedDoctor = await Doctor.findByPk(doctor.id, {
-      include: [
+    const { doctor, doctorUser } = await sequelize.transaction(async (transaction) => {
+      const passwordHash = await User.hashPassword(password);
+      const doctorUser = await User.create(
         {
-          model: Department,
-          as: "department",
-          attributes: ["id", "name"],
+          fullName,
+          email,
+          passwordHash,
+          role: "doctor",
         },
-      ],
+        { transaction }
+      );
+
+      const doctor = await Doctor.create(
+        {
+          userId: doctorUser.id,
+          departmentId: departmentId || null,
+          fullName,
+          specialty,
+          qualification,
+          experienceYears,
+          bio,
+        },
+        { transaction }
+      );
+
+      const populatedDoctor = await Doctor.findByPk(doctor.id, {
+        include: [
+          {
+            model: Department,
+            as: "department",
+            attributes: ["id", "name"],
+          },
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "email"],
+          },
+        ],
+        transaction,
+      });
+
+      return { doctor: populatedDoctor, doctorUser };
     });
 
     return res.status(201).json({
       doctor: {
-        ...mapDoctor(populatedDoctor),
+        ...mapDoctor(doctor),
         email: doctorUser.email,
       },
     });
@@ -443,12 +461,14 @@ router.put("/doctors/:doctorId", async (req, res) => {
       req.body.experienceYears !== undefined ? req.body.experienceYears : doctor.experienceYears
     );
     const departmentId = req.body.departmentId ? Number(req.body.departmentId) : null;
+    const bio = String(req.body.bio ?? doctor.bio ?? "").trim();
 
     doctor.fullName = fullName;
     doctor.specialty = specialty;
     doctor.qualification = qualification;
     doctor.experienceYears = Number.isNaN(experienceYears) ? 0 : experienceYears;
     doctor.departmentId = departmentId;
+    doctor.bio = bio;
     await doctor.save();
 
     if (doctor.user) {
